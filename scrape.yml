@@ -1,0 +1,35 @@
+name: Run Scraper
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright
+        run: npx playwright install chromium --with-deps
+
+      - name: Run scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          HEADLESS: true
+          BASE_URL: https://bangalore.idbf.in
+          MIN_DELAY_MS: 2000
+          MAX_DELAY_MS: 5000
+          MAX_RETRIES: 3
+          LOG_LEVEL: info
+          OUTPUT_DIR: ./output
+        run: node index.js
