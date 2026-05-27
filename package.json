@@ -1,0 +1,26 @@
+{
+  "name": "idbf-bangalore-scraper",
+  "version": "1.0.0",
+  "description": "Production-ready Playwright scraper for bangalore.idbf.in with Supabase integration",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "scrape": "node index.js",
+    "scrape:headful": "HEADLESS=false node index.js",
+    "install:browsers": "npx playwright install chromium",
+    "setup": "npm install && npx playwright install chromium"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "playwright": "^1.44.0",
+    "dotenv": "^16.4.5",
+    "winston": "^3.13.0",
+    "csv-writer": "^1.6.0",
+    "p-limit": "^3.1.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "",
+  "license": "MIT"
+}
