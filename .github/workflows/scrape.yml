@@ -2,8 +2,6 @@ name: Run Scraper
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '30 18 * * *'
 
 jobs:
   scrape:
@@ -21,7 +19,7 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      - name: Install Playwright Chromium
+      - name: Install Playwright
         run: npx playwright install chromium
 
       - name: Run Scraper
@@ -29,11 +27,5 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           HEADLESS: true
-          BASE_URL: https://bangalore.idbf.in
-          MIN_DELAY_MS: 2000
-          MAX_DELAY_MS: 5000
-          MAX_RETRIES: 3
-          LOG_LEVEL: info
-          OUTPUT_DIR: ./output
 
         run: node index.js
