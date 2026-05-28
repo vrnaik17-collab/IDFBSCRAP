@@ -1,4 +1,5 @@
 const { chromium } = require("playwright");
+const fs = require("fs");
 
 async function runScraper() {
   const browser = await chromium.launch({
@@ -19,7 +20,7 @@ async function runScraper() {
     }
   });
 
-  // Stealth fixes
+  // Anti-bot stealth
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "webdriver", {
       get: () => false
@@ -31,21 +32,27 @@ async function runScraper() {
   try {
     console.log("Opening IDBF homepage...");
 
-    // DO NOT wait for full load
     await page.goto("https://idbf.in/", {
       waitUntil: "commit",
       timeout: 120000
     });
 
-    // Manual delay instead
+    // Wait for JS rendering
     await page.waitForTimeout(15000);
 
     console.log("Page opened");
 
-    // Screenshot debug
+    // DEBUG FILES
     await page.screenshot({
-      path: "homepage.png"
+      path: "debug-homepage.png",
+      fullPage: true
     });
+
+    const html = await page.content();
+
+    fs.writeFileSync("debug-homepage.html", html);
+
+    console.log("Debug files saved");
 
     // CLICK BANGALORE
     console.log("Clicking Bangalore city...");
@@ -64,7 +71,9 @@ async function runScraper() {
 
     console.log("Opened Bangalore page");
 
-    // GET BUSINESS LINKS
+    // EXTRACT BUSINESS LINKS
+    console.log("Collecting business links...");
+
     const businessLinks = await page.evaluate(() => {
       const links = Array.from(document.querySelectorAll("a"));
 
@@ -88,6 +97,7 @@ async function runScraper() {
 
     console.log(`Found ${uniqueLinks.length} links`);
 
+    // OPEN BUSINESS PAGES
     for (const item of uniqueLinks.slice(0, 50)) {
       try {
         console.log(`Opening ${item.href}`);
@@ -146,6 +156,20 @@ async function runScraper() {
   } catch (err) {
     console.error("Scraper Error:");
     console.error(err);
+
+    // SAVE ERROR SCREENSHOT
+    try {
+      await page.screenshot({
+        path: "error-page.png",
+        fullPage: true
+      });
+
+      const html = await page.content();
+
+      fs.writeFileSync("error-page.html", html);
+
+      console.log("Error debug files saved");
+    } catch (e) {}
 
     await browser.close();
 
