@@ -22,27 +22,22 @@ async function runScraper() {
 
     await page.waitForTimeout(5000);
 
-    // SEARCH BANGALORE
-    console.log("Searching Bangalore...");
+    // CLICK BANGALORE CITY
+    console.log("Clicking Bangalore city...");
 
-    const searchInput = await page.locator('input[type="search"], input');
+    const bangalore = page.locator(
+      'xpath=/html/body/div[5]/div[2]/div[16]/div[2]/div/a[2]'
+    );
 
-    await searchInput.first().fill("Bangalore");
-
-    await page.waitForTimeout(2000);
-
-    // CLICK BANGALORE LINK
-    const bangaloreLink = await page.locator("a", {
-      hasText: "Bangalore"
-    });
-
-    await bangaloreLink.first().click();
+    await bangalore.click();
 
     await page.waitForTimeout(5000);
 
     console.log("Opened Bangalore page");
 
-    // GET BUSINESS LINKS
+    // EXTRACT BUSINESS LINKS
+    console.log("Collecting business links...");
+
     const businessLinks = await page.evaluate(() => {
       const links = Array.from(document.querySelectorAll("a"));
 
@@ -68,7 +63,7 @@ async function runScraper() {
 
     console.log(`Found ${uniqueLinks.length} links`);
 
-    // OPEN EACH BUSINESS
+    // OPEN BUSINESS PAGES
     for (const item of uniqueLinks.slice(0, 50)) {
       try {
         console.log(`Opening ${item.href}`);
@@ -83,10 +78,12 @@ async function runScraper() {
         const business = await page.evaluate(() => {
           const text = document.body.innerText;
 
+          // PHONE
           const phoneMatch = text.match(
             /(\+91[\s-]?)?[6-9]\d{9}/
           );
 
+          // ADDRESS
           const address =
             text
               .split("\n")
