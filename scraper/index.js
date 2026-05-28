@@ -2,12 +2,28 @@ const { chromium } = require("playwright");
 
 async function runScraper() {
   const browser = await chromium.launch({
-    headless: true
+    headless: true,
+    args: [
+      "--disable-blink-features=AutomationControlled",
+      "--no-sandbox",
+      "--disable-setuid-sandbox"
+    ]
   });
 
   const page = await browser.newPage({
     userAgent:
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36"
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    viewport: {
+      width: 1366,
+      height: 768
+    }
+  });
+
+  // Stealth fixes
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", {
+      get: () => false
+    });
   });
 
   const businesses = [];
@@ -15,25 +31,40 @@ async function runScraper() {
   try {
     console.log("Opening IDBF homepage...");
 
+    // DO NOT wait for full load
     await page.goto("https://idbf.in/", {
-      waitUntil: "domcontentloaded",
-      timeout: 60000
+      waitUntil: "commit",
+      timeout: 120000
     });
 
-    await page.waitForTimeout(5000);
+    // Manual delay instead
+    await page.waitForTimeout(15000);
+
+    console.log("Page opened");
+
+    // Screenshot debug
+    await page.screenshot({
+      path: "homepage.png"
+    });
 
     // CLICK BANGALORE
     console.log("Clicking Bangalore city...");
 
-    await page.locator('a.city-tag[href*="bangalore"]').click();
+    const bangalore = page.locator(
+      'a.city-tag[href*="bangalore"]'
+    );
 
-    await page.waitForTimeout(5000);
+    await bangalore.waitFor({
+      timeout: 30000
+    });
+
+    await bangalore.click();
+
+    await page.waitForTimeout(10000);
 
     console.log("Opened Bangalore page");
 
-    // EXTRACT BUSINESS LINKS
-    console.log("Collecting business links...");
-
+    // GET BUSINESS LINKS
     const businessLinks = await page.evaluate(() => {
       const links = Array.from(document.querySelectorAll("a"));
 
@@ -45,9 +76,7 @@ async function runScraper() {
         .filter(
           (item) =>
             item.href &&
-            item.href.includes("bangalore.idbf.in") &&
-            item.text &&
-            item.text.length > 2
+            item.href.includes("bangalore.idbf.in")
         );
     });
 
@@ -59,35 +88,23 @@ async function runScraper() {
 
     console.log(`Found ${uniqueLinks.length} links`);
 
-    // OPEN BUSINESS PAGES
     for (const item of uniqueLinks.slice(0, 50)) {
       try {
         console.log(`Opening ${item.href}`);
 
         await page.goto(item.href, {
-          waitUntil: "domcontentloaded",
-          timeout: 60000
+          waitUntil: "commit",
+          timeout: 120000
         });
 
-        await page.waitForTimeout(3000);
+        await page.waitForTimeout(5000);
 
         const business = await page.evaluate(() => {
           const text = document.body.innerText;
 
-          // PHONE EXTRACTION
           const phoneMatch = text.match(
             /(\+91[\s-]?)?[6-9]\d{9}/
           );
-
-          // ADDRESS EXTRACTION
-          const address =
-            text
-              .split("\n")
-              .find(
-                (line) =>
-                  line.includes("Bangalore") ||
-                  line.includes("Bengaluru")
-              ) || "";
 
           return {
             name:
@@ -97,7 +114,7 @@ async function runScraper() {
 
             category: "Business",
 
-            address,
+            address: "",
 
             phone: phoneMatch ? phoneMatch[0] : "",
 
