@@ -16,13 +16,13 @@ async function runScraper() {
     console.log("Opening IDBF homepage...");
 
     await page.goto("https://idbf.in/", {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
       timeout: 60000
     });
 
     await page.waitForTimeout(5000);
 
-    // STEP 1 — Find Bangalore city link
+    // STEP 1 — Find Bangalore city page
     console.log("Finding Bangalore city page...");
 
     const cityLink = await page.evaluate(() => {
@@ -43,7 +43,7 @@ async function runScraper() {
 
     // STEP 2 — Open Bangalore page
     await page.goto(cityLink, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
       timeout: 60000
     });
 
@@ -68,15 +68,15 @@ async function runScraper() {
       throw new Error("AC Dealers category not found");
     }
 
-    // STEP 4 — Open category page
+    // STEP 4 — Open AC Dealers page
     await page.goto(categoryLink, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
       timeout: 60000
     });
 
     await page.waitForTimeout(5000);
 
-    // STEP 5 — Extract business links
+    // STEP 5 — Collect business links
     console.log("Collecting business links...");
 
     const businessLinks = await page.evaluate(() => {
@@ -92,11 +92,12 @@ async function runScraper() {
         );
     });
 
+    // Remove duplicates
     const uniqueLinks = [...new Set(businessLinks)];
 
     console.log(`Found ${uniqueLinks.length} business links`);
 
-    // STEP 6 — Visit each business page
+    // STEP 6 — Visit business pages
     for (const link of uniqueLinks.slice(0, 50)) {
       try {
         console.log(`Opening business: ${link}`);
@@ -111,12 +112,12 @@ async function runScraper() {
         const business = await page.evaluate(() => {
           const text = document.body.innerText;
 
-          // Phone extraction
+          // Extract phone number
           const phoneMatch = text.match(
             /(\+91[\s-]?)?[6-9]\d{9}/
           );
 
-          // Address extraction
+          // Extract address
           const address =
             text
               .split("\n")
