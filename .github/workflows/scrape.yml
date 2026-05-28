@@ -2,38 +2,53 @@ name: Run Scraper
 
 on:
   workflow_dispatch:
+    inputs:
+      cities:
+        description: 'Cities to scrape comma separated e.g. bangalore,mumbai,delhi'
+        required: false
+        default: 'bangalore'
+  schedule:
+    - cron: '0 2 * * *'
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
         with:
-          node-version: 22
+          node-version: '18'
+          cache: 'npm'
 
       - name: Install dependencies
         run: npm install
 
-      - name: Install Playwright
+      - name: Install Playwright Chromium
         run: npx playwright install chromium --with-deps
 
       - name: Run scraper
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          CITIES: ${{ github.event.inputs.cities || 'bangalore' }}
+          BASE_URL: https://bangalore.idbf.in
+          HEADLESS: true
+          MIN_DELAY_MS: 2000
+          MAX_DELAY_MS: 5000
+          MAX_RETRIES: 3
+          LOG_LEVEL: info
+          OUTPUT_DIR: ./output
         run: node index.js
 
-      - name: Upload debug files
-        uses: actions/upload-artifact@v4
+      - name: Upload output as artifact
+        if: always()
+        uses: actions/upload-artifact@v3
         with:
-          name: debug-files
-          path: |
-            debug-homepage.png
-            debug-homepage.html
-            error-page.png
-            error-page.html
+          name: scraper-output-${{ github.run_id }}
+          path: output/
+          retention-days: 7
