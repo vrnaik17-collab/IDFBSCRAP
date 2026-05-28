@@ -5,68 +5,120 @@ async function runScraper() {
     headless: true
   });
 
-  const page = await browser.newPage();
+  const page = await browser.newPage({
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36"
+  });
 
   const businesses = [];
 
   try {
-    console.log("Opening website...");
+    console.log("Opening IDBF homepage...");
 
-    await page.goto("https://bangalore.idbf.in/ac-dealers", {
+    await page.goto("https://idbf.in/", {
       waitUntil: "networkidle",
       timeout: 60000
     });
 
     await page.waitForTimeout(5000);
 
+    // STEP 1 — Find Bangalore city link
+    console.log("Finding Bangalore city page...");
+
+    const cityLink = await page.evaluate(() => {
+      const links = Array.from(document.querySelectorAll("a"));
+
+      const city = links.find((link) =>
+        link.innerText.toLowerCase().includes("bangalore")
+      );
+
+      return city ? city.href : null;
+    });
+
+    console.log("City Link:", cityLink);
+
+    if (!cityLink) {
+      throw new Error("Bangalore city page not found");
+    }
+
+    // STEP 2 — Open Bangalore page
+    await page.goto(cityLink, {
+      waitUntil: "networkidle",
+      timeout: 60000
+    });
+
+    await page.waitForTimeout(5000);
+
+    // STEP 3 — Find AC Dealers category
+    console.log("Finding AC Dealers category...");
+
+    const categoryLink = await page.evaluate(() => {
+      const links = Array.from(document.querySelectorAll("a"));
+
+      const category = links.find((link) =>
+        link.innerText.toLowerCase().includes("ac dealers")
+      );
+
+      return category ? category.href : null;
+    });
+
+    console.log("Category Link:", categoryLink);
+
+    if (!categoryLink) {
+      throw new Error("AC Dealers category not found");
+    }
+
+    // STEP 4 — Open category page
+    await page.goto(categoryLink, {
+      waitUntil: "networkidle",
+      timeout: 60000
+    });
+
+    await page.waitForTimeout(5000);
+
+    // STEP 5 — Extract business links
     console.log("Collecting business links...");
 
-    // Get all links from page
-    const links = await page.$$eval("a", (elements) =>
-      elements
-        .map((el) => el.href)
+    const businessLinks = await page.evaluate(() => {
+      const links = Array.from(document.querySelectorAll("a"));
+
+      return links
+        .map((link) => link.href)
         .filter(
           (href) =>
             href &&
-            href.includes("bangalore.idbf.in") &&
+            href.includes("idbf.in") &&
             !href.includes("/ac-dealers")
-        )
-    );
+        );
+    });
 
-    // Remove duplicates
-    const uniqueLinks = [...new Set(links)];
+    const uniqueLinks = [...new Set(businessLinks)];
 
     console.log(`Found ${uniqueLinks.length} business links`);
 
-    // Visit each business page
+    // STEP 6 — Visit each business page
     for (const link of uniqueLinks.slice(0, 50)) {
       try {
-        console.log(`Opening: ${link}`);
+        console.log(`Opening business: ${link}`);
 
         await page.goto(link, {
           waitUntil: "domcontentloaded",
           timeout: 60000
         });
 
-        await page.waitForTimeout(2000);
+        await page.waitForTimeout(3000);
 
         const business = await page.evaluate(() => {
-          const bodyText = document.body.innerText;
+          const text = document.body.innerText;
 
-          // Extract phone number
-          const phoneMatch = bodyText.match(
+          // Phone extraction
+          const phoneMatch = text.match(
             /(\+91[\s-]?)?[6-9]\d{9}/
           );
 
-          // Business name
-          const name =
-            document.querySelector("h1")?.innerText?.trim() ||
-            document.title ||
-            "";
-
-          // Try extracting address
+          // Address extraction
           const address =
-            bodyText
+            text
               .split("\n")
               .find(
                 (line) =>
@@ -75,17 +127,25 @@ async function runScraper() {
               ) || "";
 
           return {
-            name,
+            name:
+              document.querySelector("h1")?.innerText?.trim() ||
+              document.title ||
+              "",
+
             category: "AC Dealer",
+
             address,
+
             phone: phoneMatch ? phoneMatch[0] : "",
+
             city: "Bangalore",
+
             state: "Karnataka",
+
             source_url: window.location.href
           };
         });
 
-        // Save only if phone or name exists
         if (business.name || business.phone) {
           businesses.push(business);
 
@@ -94,7 +154,7 @@ async function runScraper() {
           );
         }
       } catch (err) {
-        console.log(`Failed: ${link}`);
+        console.log(`Failed business page: ${link}`);
       }
     }
 
