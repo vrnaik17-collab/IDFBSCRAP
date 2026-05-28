@@ -22,14 +22,10 @@ async function runScraper() {
 
     await page.waitForTimeout(5000);
 
-    // CLICK BANGALORE CITY
+    // CLICK BANGALORE
     console.log("Clicking Bangalore city...");
 
-    const bangalore = page.locator(
-      'xpath=/html/body/div[5]/div[2]/div[16]/div[2]/div/a[2]'
-    );
-
-    await bangalore.click();
+    await page.locator('a.city-tag[href*="bangalore"]').click();
 
     await page.waitForTimeout(5000);
 
@@ -49,7 +45,7 @@ async function runScraper() {
         .filter(
           (item) =>
             item.href &&
-            item.href.includes("idbf.in") &&
+            item.href.includes("bangalore.idbf.in") &&
             item.text &&
             item.text.length > 2
         );
@@ -78,12 +74,12 @@ async function runScraper() {
         const business = await page.evaluate(() => {
           const text = document.body.innerText;
 
-          // PHONE
+          // PHONE EXTRACTION
           const phoneMatch = text.match(
             /(\+91[\s-]?)?[6-9]\d{9}/
           );
 
-          // ADDRESS
+          // ADDRESS EXTRACTION
           const address =
             text
               .split("\n")
