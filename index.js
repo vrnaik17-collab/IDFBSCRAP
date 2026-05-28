@@ -17,7 +17,7 @@ async function saveBusinesses(businesses) {
       phone: business.phone || "",
       city: business.city || "",
       state: business.state || "",
-      source_url: business.source_url || business.url || ""
+      source_url: business.source_url || ""
     }));
 
     console.log(`Saving ${formattedBusinesses.length} businesses...`);
