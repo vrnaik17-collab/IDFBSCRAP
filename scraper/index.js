@@ -22,87 +22,58 @@ async function runScraper() {
 
     await page.waitForTimeout(5000);
 
-    // STEP 1 — Find Bangalore city page
-    console.log("Finding Bangalore city page...");
+    // SEARCH BANGALORE
+    console.log("Searching Bangalore...");
 
-    const cityLink = await page.evaluate(() => {
-      const links = Array.from(document.querySelectorAll("a"));
+    const searchInput = await page.locator('input[type="search"], input');
 
-      const city = links.find((link) =>
-        link.innerText.toLowerCase().includes("bangalore")
-      );
+    await searchInput.first().fill("Bangalore");
 
-      return city ? city.href : null;
+    await page.waitForTimeout(2000);
+
+    // CLICK BANGALORE LINK
+    const bangaloreLink = await page.locator("a", {
+      hasText: "Bangalore"
     });
 
-    console.log("City Link:", cityLink);
-
-    if (!cityLink) {
-      throw new Error("Bangalore city page not found");
-    }
-
-    // STEP 2 — Open Bangalore page
-    await page.goto(cityLink, {
-      waitUntil: "domcontentloaded",
-      timeout: 60000
-    });
+    await bangaloreLink.first().click();
 
     await page.waitForTimeout(5000);
 
-    // STEP 3 — Find AC Dealers category
-    console.log("Finding AC Dealers category...");
+    console.log("Opened Bangalore page");
 
-    const categoryLink = await page.evaluate(() => {
-      const links = Array.from(document.querySelectorAll("a"));
-
-      const category = links.find((link) =>
-        link.innerText.toLowerCase().includes("ac dealers")
-      );
-
-      return category ? category.href : null;
-    });
-
-    console.log("Category Link:", categoryLink);
-
-    if (!categoryLink) {
-      throw new Error("AC Dealers category not found");
-    }
-
-    // STEP 4 — Open AC Dealers page
-    await page.goto(categoryLink, {
-      waitUntil: "domcontentloaded",
-      timeout: 60000
-    });
-
-    await page.waitForTimeout(5000);
-
-    // STEP 5 — Collect business links
-    console.log("Collecting business links...");
-
+    // GET BUSINESS LINKS
     const businessLinks = await page.evaluate(() => {
       const links = Array.from(document.querySelectorAll("a"));
 
       return links
-        .map((link) => link.href)
+        .map((link) => ({
+          href: link.href,
+          text: link.innerText?.trim()
+        }))
         .filter(
-          (href) =>
-            href &&
-            href.includes("idbf.in") &&
-            !href.includes("/ac-dealers")
+          (item) =>
+            item.href &&
+            item.href.includes("idbf.in") &&
+            item.text &&
+            item.text.length > 2
         );
     });
 
-    // Remove duplicates
-    const uniqueLinks = [...new Set(businessLinks)];
+    const uniqueLinks = [
+      ...new Map(
+        businessLinks.map((item) => [item.href, item])
+      ).values()
+    ];
 
-    console.log(`Found ${uniqueLinks.length} business links`);
+    console.log(`Found ${uniqueLinks.length} links`);
 
-    // STEP 6 — Visit business pages
-    for (const link of uniqueLinks.slice(0, 50)) {
+    // OPEN EACH BUSINESS
+    for (const item of uniqueLinks.slice(0, 50)) {
       try {
-        console.log(`Opening business: ${link}`);
+        console.log(`Opening ${item.href}`);
 
-        await page.goto(link, {
+        await page.goto(item.href, {
           waitUntil: "domcontentloaded",
           timeout: 60000
         });
@@ -112,12 +83,10 @@ async function runScraper() {
         const business = await page.evaluate(() => {
           const text = document.body.innerText;
 
-          // Extract phone number
           const phoneMatch = text.match(
             /(\+91[\s-]?)?[6-9]\d{9}/
           );
 
-          // Extract address
           const address =
             text
               .split("\n")
@@ -133,7 +102,7 @@ async function runScraper() {
               document.title ||
               "",
 
-            category: "AC Dealer",
+            category: "Business",
 
             address,
 
@@ -155,7 +124,7 @@ async function runScraper() {
           );
         }
       } catch (err) {
-        console.log(`Failed business page: ${link}`);
+        console.log(`Failed: ${item.href}`);
       }
     }
 
