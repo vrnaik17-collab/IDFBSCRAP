@@ -8,7 +8,7 @@ const MAX_DELAY = parseInt(process.env.MAX_DELAY_MS) || 3000;
 
 function getCityFromUrl() {
   try {
-    const host = new URL(BASE_URL).hostname;
+    const host = new URL(process.env.BASE_URL || BASE_URL).hostname;
     const city = host.split('.')[0];
     return city.charAt(0).toUpperCase() + city.slice(1);
   } catch { return 'Bangalore'; }
@@ -19,6 +19,7 @@ async function scrapeCategory(page, category) {
   let currentUrl = category.url;
   let pageNum = 1;
   const city = getCityFromUrl();
+  const cityBase = process.env.BASE_URL || BASE_URL;
 
   logger.info(`\nScraping: "${category.name}" | ${category.url}`);
 
@@ -35,23 +36,24 @@ async function scrapeCategory(page, category) {
       await autoScroll(page);
       await page.waitForTimeout(2000);
 
-      const listingUrls = await page.evaluate((baseUrl) => {
+      // Fix: pass single object argument to page.evaluate
+      const listingUrls = await page.evaluate(({ base }) => {
         const urls = [];
         const seen = new Set();
         document.querySelectorAll('a[href]').forEach(el => {
           let href = el.getAttribute('href') || '';
           if (!href.startsWith('http')) {
-            href = href.startsWith('/') ? `${baseUrl}${href}` : '';
+            href = href.startsWith('/') ? `${base}${href}` : '';
           }
-          if (!href || !href.startsWith(baseUrl)) return;
-          const path = href.replace(baseUrl, '');
+          if (!href || !href.startsWith(base)) return;
+          const path = href.replace(base, '');
           if (/^\/\d{4,}\//.test(path) && !seen.has(href)) {
             seen.add(href);
             urls.push(href);
           }
         });
         return urls;
-      }, BASE_URL);
+      }, { base: cityBase });
 
       logger.info(`  Found ${listingUrls.length} business listings`);
 
@@ -75,7 +77,8 @@ async function scrapeCategory(page, category) {
           await randomDelay(MIN_DELAY, MAX_DELAY);
         }
       } else {
-        const inline = await extractInlineBusinesses(page, category, city);
+        // Fix: pass single object to page.evaluate
+        const inline = await extractInlineBusinesses(page, category, city, cityBase);
         if (inline.length > 0) {
           logger.info(`  Extracted ${inline.length} inline businesses`);
           businesses.push(...inline);
@@ -135,7 +138,9 @@ async function scrapeBusinessDetail(page, url, category, city) {
       ]) || 'Karnataka';
 
       const telEl = document.querySelector('a[href^="tel:"]');
-      const telPhone = telEl ? telEl.getAttribute('href').replace('tel:', '').trim() : '';
+      const telPhone = telEl
+        ? telEl.getAttribute('href').replace('tel:', '').trim()
+        : '';
 
       return { name, address, state, telPhone };
     });
@@ -192,9 +197,11 @@ async function clickShowNumberAndExtract(page) {
     await page.evaluate(() => {
       document.querySelectorAll('a, button, span, div').forEach(el => {
         const t = (el.textContent || '').toLowerCase().trim();
-        if (t === 'show number' || t.startsWith('show number') ||
-            t === 'show mobile' || t === 'show phone' ||
-            t === 'click to call' || t === 'view number') {
+        if (
+          t === 'show number' || t.startsWith('show number') ||
+          t === 'show mobile' || t === 'show phone' ||
+          t === 'click to call' || t === 'view number'
+        ) {
           el.click();
         }
       });
@@ -230,8 +237,9 @@ async function clickShowNumberAndExtract(page) {
   return phone;
 }
 
-async function extractInlineBusinesses(page, category, city) {
-  return await page.evaluate((baseUrl, cat, cityName) => {
+async function extractInlineBusinesses(page, category, city, cityBase) {
+  // Fix: pass single object to page.evaluate
+  return await page.evaluate(({ base, cat, cityName }) => {
     const businesses = [];
     const seen = new Set();
 
@@ -252,19 +260,27 @@ async function extractInlineBusinesses(page, category, city) {
       const nameEl = card.querySelector(
         'h1,h2,h3,h4,.name,.title,.business-name,.listing-title,[class*="name"]'
       );
-      const name = nameEl ? (nameEl.textContent || '').replace(/\s+/g, ' ').trim() : '';
+      const name = nameEl
+        ? (nameEl.textContent || '').replace(/\s+/g, ' ').trim()
+        : '';
       if (!name || name.length < 2) return;
 
-      const addrEl = card.querySelector('.address,[itemprop="streetAddress"],.location,[class*="address"]');
-      const address = addrEl ? (addrEl.textContent || '').replace(/\s+/g, ' ').trim() : '';
+      const addrEl = card.querySelector(
+        '.address,[itemprop="streetAddress"],.location,[class*="address"]'
+      );
+      const address = addrEl
+        ? (addrEl.textContent || '').replace(/\s+/g, ' ').trim()
+        : '';
 
       const telEl = card.querySelector('a[href^="tel:"]');
-      const phone = telEl ? telEl.getAttribute('href').replace('tel:', '').trim() : '';
+      const phone = telEl
+        ? telEl.getAttribute('href').replace('tel:', '').trim()
+        : '';
 
       const linkEl = card.querySelector('a[href]');
       let url = linkEl ? (linkEl.getAttribute('href') || '') : '';
       if (url && !url.startsWith('http')) {
-        url = url.startsWith('/') ? `${baseUrl}${url}` : `${baseUrl}/${url}`;
+        url = url.startsWith('/') ? `${base}${url}` : `${base}/${url}`;
       }
 
       const key = url || name;
@@ -272,18 +288,22 @@ async function extractInlineBusinesses(page, category, city) {
       seen.add(key);
 
       businesses.push({
-        name, category: cat.name, address, phone,
-        city: cityName, state: 'Karnataka',
-        source_url: url || baseUrl
+        name,
+        category: cat.name,
+        address,
+        phone,
+        city: cityName,
+        state: 'Karnataka',
+        source_url: url || base
       });
     });
 
     return businesses;
-  }, BASE_URL, category, city);
+  }, { base: cityBase, cat: category, cityName: city });
 }
 
 async function getNextPageUrl(page, currentUrl) {
-  return await page.evaluate((current) => {
+  return await page.evaluate(({ current }) => {
     const selectors = [
       'a[rel="next"]', 'a.next', '.pagination .next a',
       'a.page-numbers.next', 'li.next a',
@@ -309,7 +329,7 @@ async function getNextPageUrl(page, currentUrl) {
       }
     }
     return null;
-  }, currentUrl);
+  }, { current: currentUrl });
 }
 
 module.exports = { scrapeCategory };
