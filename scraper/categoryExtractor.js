@@ -1,114 +1,37 @@
 const { randomDelay, withRetry } = require('../utils/helpers');
 const logger = require('../utils/logger');
 
-const CITY = process.env.CITY || 'bangalore';
+const BASE_URL = process.env.BASE_URL || 'https://bangalore.idbf.in';
 
-const SKIP_SLUGS = [
+const SKIP_EXACT = [
   'register', 'about', 'about-us', 'contact', 'contact-us',
   'login', 'logout', 'privacy', 'privacy-policy', 'terms',
   'terms-and-conditions', 'sitemap', 'advertise', 'feedback',
-  'faq', 'help', 'blog', 'news'
+  'faq', 'help', 'blog', 'news', 'a', 'b', 'c', 'd', 'e',
+  'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p',
+  'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'
 ];
-
-async function navigateToCityPage(page) {
-  // Step 1 — open idbf.in
-  logger.info('Step 1: Opening https://idbf.in');
-  await page.goto('https://idbf.in', {
-    waitUntil: 'domcontentloaded',
-    timeout: 90000
-  });
-  await page.waitForTimeout(4000);
-  logger.info(`Loaded: ${await page.title()}`);
-
-  // Step 2 — find and click city link
-  logger.info(`Step 2: Finding city link for "${CITY}"`);
-  const cityHref = await page.evaluate((city) => {
-    const anchors = document.querySelectorAll('a[href]');
-    for (const el of anchors) {
-      const href = (el.getAttribute('href') || '').toLowerCase();
-      const text = (el.textContent || '').toLowerCase().trim();
-      if (href.includes(`${city}.idbf.in`) || text === city.toLowerCase()) {
-        return el.getAttribute('href');
-      }
-    }
-    return null;
-  }, CITY);
-
-  if (!cityHref) {
-    throw new Error(`City link for "${CITY}" not found on idbf.in`);
-  }
-
-  logger.info(`Found city link: ${cityHref}`);
-
-  // Step 3 — navigate to city page
-  logger.info(`Step 3: Opening city page ${cityHref}`);
-  await page.goto(cityHref, {
-    waitUntil: 'domcontentloaded',
-    timeout: 90000
-  });
-  await page.waitForTimeout(5000);
-  await autoScroll(page);
-  await page.waitForTimeout(2000);
-
-  const cityPageUrl = page.url();
-  const cityBase = new URL(cityPageUrl).origin; // e.g. https://bangalore.idbf.in
-  process.env.CITY_BASE_URL = cityBase;
-  process.env.BASE_URL = cityBase;
-
-  logger.info(`City page loaded: ${await page.title()}`);
-  logger.info(`City base URL: ${cityBase}`);
-
-  return cityBase;
-}
 
 async function extractCategories(page) {
   return withRetry(async () => {
+    logger.info(`Opening homepage: ${BASE_URL}`);
 
-    // Navigate from idbf.in → city page
-    const cityBase = await navigateToCityPage(page);
+    await page.goto(BASE_URL, {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000
+    });
 
-    // Step 4 — find the A-Z category index link
-    logger.info('Step 4: Finding A-Z category list');
+    await page.waitForTimeout(6000);
+    await autoScroll(page);
+    await page.waitForTimeout(3000);
 
-    const azUrl = await page.evaluate((base) => {
-      const anchors = document.querySelectorAll('a[href]');
-      for (const el of anchors) {
-        const href = (el.getAttribute('href') || '');
-        const text = (el.textContent || '').toLowerCase().trim();
-        if (
-          text.includes('a-z') || text.includes('a to z') ||
-          text.includes('categories') || text.includes('all categories') ||
-          href.includes('/a-z') || href.includes('/categories')
-        ) {
-          if (!href.startsWith('http')) {
-            return href.startsWith('/') ? `${base}${href}` : `${base}/${href}`;
-          }
-          return href;
-        }
-      }
-      return null;
-    }, cityBase);
+    const title = await page.title();
+    logger.info(`Page title: ${title}`);
 
-    let categoryPageUrl = azUrl;
+    const bodyPreview = await page.evaluate(() => document.body.innerText.substring(0, 200));
+    logger.info(`Page preview: ${bodyPreview}`);
 
-    if (azUrl) {
-      logger.info(`Found A-Z link: ${azUrl}`);
-      logger.info('Step 5: Opening A-Z category page');
-      await page.goto(azUrl, {
-        waitUntil: 'domcontentloaded',
-        timeout: 90000
-      });
-      await page.waitForTimeout(4000);
-      await autoScroll(page);
-      await page.waitForTimeout(2000);
-    } else {
-      logger.info('No A-Z link found — extracting categories from city homepage directly');
-    }
-
-    // Step 6 — extract all category links
-    logger.info('Step 6: Extracting category links');
-
-    const allLinks = await page.evaluate((base) => {
+    const allLinks = await page.evaluate((baseUrl) => {
       const links = [];
       const seen = new Set();
       document.querySelectorAll('a[href]').forEach(el => {
@@ -116,48 +39,37 @@ async function extractCategories(page) {
         const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
         if (!href || href === '#') return;
         if (!href.startsWith('http')) {
-          href = href.startsWith('/') ? `${base}${href}` : '';
+          href = href.startsWith('/') ? `${baseUrl}${href}` : '';
         }
-        if (!href.startsWith(base)) return;
-        if (href === base || href === base + '/') return;
+        if (!href.startsWith(baseUrl)) return;
+        if (href === baseUrl || href === baseUrl + '/') return;
         if (!seen.has(href) && text.length > 1 && text.length < 80) {
           seen.add(href);
           links.push({ name: text, url: href });
         }
       });
       return links;
-    }, cityBase);
+    }, BASE_URL);
 
     logger.info(`Total links found: ${allLinks.length}`);
 
-    // Filter to real category slugs only
     const categories = allLinks.filter(link => {
       const url = link.url.toLowerCase();
-      let path = url.replace(cityBase.toLowerCase(), '');
+      let path = url.replace(BASE_URL.toLowerCase(), '');
       path = path.replace(/^\//, '').replace(/\/$/, '');
 
       if (!path || path.length < 2) return false;
+      if (SKIP_EXACT.includes(path)) return false;
 
-      // Skip exact junk pages
-      if (SKIP_SLUGS.includes(path)) return false;
-
-      // Skip single letters a-z
-      if (/^[a-z]$/.test(path)) return false;
-
-      // Skip numeric IDs — those are business detail pages
-      if (/^\d/.test(path)) return false;
-
-      // Skip multi-level paths except pagination
       const parts = path.split('/');
       if (parts.length > 1 && !path.includes('page')) return false;
 
-      // Must have letters
+      if (/^\d+/.test(path)) return false;
       if (!/[a-z]/.test(path)) return false;
 
       return true;
     });
 
-    // Deduplicate
     const seenUrls = new Set();
     const unique = categories.filter(c => {
       if (seenUrls.has(c.url)) return false;
@@ -165,17 +77,17 @@ async function extractCategories(page) {
       return true;
     });
 
-    logger.info(`Found ${unique.length} categories`);
+    logger.info(`Found ${unique.length} real categories`);
     unique.forEach(c => logger.info(`  → ${c.name} | ${c.url}`));
 
     if (unique.length === 0) {
-      logger.warn('No categories found — dumping all links:');
-      allLinks.slice(0, 30).forEach(l => logger.info(`  ${l.name} | ${l.url}`));
-      return [{ name: 'All Businesses', url: cityBase }];
+      logger.warn('0 categories — dumping all links:');
+      allLinks.forEach(l => logger.info(`  ALL: ${l.name} | ${l.url}`));
+      return [{ name: 'All Businesses', url: BASE_URL }];
     }
 
     return unique;
-  }, 3, 8000, 'extractCategories');
+  }, 3, 5000, 'extractCategories');
 }
 
 async function autoScroll(page) {
