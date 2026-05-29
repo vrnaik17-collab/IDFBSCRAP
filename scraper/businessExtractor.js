@@ -33,7 +33,7 @@ async function scrapeCategory(page, category) {
       logger.info(`  Page ${pageNum}: ${currentUrl}`);
 
       await withRetry(() => page.goto(currentUrl, {
-        waitUntil: 'networkidle',
+        waitUntil: 'domcontentloaded',
         timeout: 90000
       }), 3, 3000, `goto ${currentUrl}`);
 
@@ -89,7 +89,7 @@ async function scrapeCategory(page, category) {
 
           try {
             await page.goto(currentUrl, {
-              waitUntil: 'networkidle',
+              waitUntil: 'domcontentloaded',
               timeout: 90000
             });
             await page.waitForTimeout(2000);
@@ -121,7 +121,7 @@ async function scrapeCategory(page, category) {
 async function scrapeBusinessDetail(page, url, category, city) {
   return withRetry(async () => {
     await page.goto(url, {
-      waitUntil: 'networkidle',
+      waitUntil: 'domcontentloaded',
       timeout: 90000
     });
     await page.waitForTimeout(3000);
