@@ -33,7 +33,7 @@ async function scrapeCategory(page, category) {
       logger.info(`  Page ${pageNum}: ${currentUrl}`);
 
       await withRetry(() => page.goto(currentUrl, {
-        waitUntil: 'domcontentloaded',
+        waitUntil: 'networkidle',
         timeout: 90000
       }), 3, 3000, `goto ${currentUrl}`);
 
@@ -42,7 +42,6 @@ async function scrapeCategory(page, category) {
       await page.waitForTimeout(2000);
 
       // Extract all business listing URLs from this category page
-      // These are links matching /NUMERIC_ID/business-slug pattern
       const listingUrls = await page.evaluate((base) => {
         const urls = [];
         const seen = new Set();
@@ -53,7 +52,6 @@ async function scrapeCategory(page, category) {
           }
           if (!href || !href.startsWith(base)) return;
 
-          // Business detail pages: /DIGITS/slug
           const path = href.replace(base, '');
           if (/^\/\d{4,}\//.test(path) && !seen.has(href)) {
             seen.add(href);
@@ -66,8 +64,8 @@ async function scrapeCategory(page, category) {
       logger.info(`  Found ${listingUrls.length} business listings`);
 
       if (listingUrls.length === 0) {
-        // Try inline extraction as fallback
-        const inline = await extractInlineBusinesses(page, category, city, cityBase);
+        // FIX: pass args as a single object to avoid Playwright "Too many arguments" error
+        const inline = await extractInlineBusinesses(page, { cityBase, category, city });
         if (inline.length > 0) {
           logger.info(`  Extracted ${inline.length} businesses inline`);
           businesses.push(...inline);
@@ -75,7 +73,6 @@ async function scrapeCategory(page, category) {
           logger.warn(`  No businesses found on page ${pageNum}`);
         }
       } else {
-        // Visit each business detail page
         for (let i = 0; i < listingUrls.length; i++) {
           const url = listingUrls[i];
           logger.info(`  [${i + 1}/${listingUrls.length}] Visiting: ${url}`);
@@ -90,10 +87,9 @@ async function scrapeCategory(page, category) {
             logger.error(`  ✗ ${url}: ${err.message}`);
           }
 
-          // Go back to category listing page after each business
           try {
             await page.goto(currentUrl, {
-              waitUntil: 'domcontentloaded',
+              waitUntil: 'networkidle',
               timeout: 90000
             });
             await page.waitForTimeout(2000);
@@ -105,7 +101,6 @@ async function scrapeCategory(page, category) {
         }
       }
 
-      // Check for next page
       currentUrl = await getNextPageUrl(page, currentUrl);
       pageNum++;
       if (currentUrl) {
@@ -125,17 +120,14 @@ async function scrapeCategory(page, category) {
 
 async function scrapeBusinessDetail(page, url, category, city) {
   return withRetry(async () => {
-    // Navigate to business detail page
     await page.goto(url, {
-      waitUntil: 'domcontentloaded',
+      waitUntil: 'networkidle',
       timeout: 90000
     });
     await page.waitForTimeout(3000);
 
-    // Click "Show Number & More Information" button
     const phone = await clickShowNumberAndExtract(page);
 
-    // Extract all business data
     const data = await page.evaluate(() => {
       const get = (selectors) => {
         for (const sel of selectors) {
@@ -148,7 +140,6 @@ async function scrapeBusinessDetail(page, url, category, city) {
         return '';
       };
 
-      // Business name — usually h1
       const name = get([
         'h1', 'h1.listing-title', 'h1.business-name',
         'h1.entry-title', '.business-name', '.listing-name',
@@ -156,7 +147,6 @@ async function scrapeBusinessDetail(page, url, category, city) {
         '.page-title', '#business-name'
       ]);
 
-      // Address
       const address = get([
         '[itemprop="streetAddress"]', '[itemprop="address"]',
         '.address', '.listing-address', '.full-address',
@@ -164,19 +154,16 @@ async function scrapeBusinessDetail(page, url, category, city) {
         '.street-address', '.location', '.addr'
       ]);
 
-      // State
       const state = get([
         '[itemprop="addressRegion"]', '.state',
         '[class*="state"]', '.region'
       ]) || 'Karnataka';
 
-      // Pincode
       const pincode = get([
         '[itemprop="postalCode"]', '.pincode',
         '.pin', '.zip', '[class*="pin"]'
       ]);
 
-      // Category from breadcrumb
       const breadEl = document.querySelector(
         '.breadcrumb, .breadcrumbs, nav[aria-label="breadcrumb"], [class*="breadcrumb"]'
       );
@@ -184,7 +171,6 @@ async function scrapeBusinessDetail(page, url, category, city) {
         ? (breadEl.textContent || '').replace(/\s+/g, ' ').trim()
         : '';
 
-      // Visible phone from tel: link
       const telEl = document.querySelector('a[href^="tel:"]');
       const telPhone = telEl
         ? telEl.getAttribute('href').replace('tel:', '').trim()
@@ -206,7 +192,6 @@ async function scrapeBusinessDetail(page, url, category, city) {
 }
 
 async function clickShowNumberAndExtract(page) {
-  // Try clicking "Show Number & More Information" or similar button
   const buttonSelectors = [
     'a:has-text("Show Number")',
     'button:has-text("Show Number")',
@@ -246,7 +231,6 @@ async function clickShowNumberAndExtract(page) {
     } catch {}
   }
 
-  // Text-based fallback
   if (!clicked) {
     try {
       const found = await page.evaluate(() => {
@@ -274,16 +258,13 @@ async function clickShowNumberAndExtract(page) {
     } catch {}
   }
 
-  // Extract phone after clicking
   const phone = await page.evaluate(() => {
-    // 1. tel: href links — most reliable
     const telLinks = document.querySelectorAll('a[href^="tel:"]');
     for (const el of telLinks) {
       const num = el.getAttribute('href').replace('tel:', '').trim();
       if (num && /\d{6,}/.test(num)) return num;
     }
 
-    // 2. Known phone element selectors
     const phoneSels = [
       '[itemprop="telephone"]',
       '.phone', '.phone-number', '.phonenumber',
@@ -300,7 +281,6 @@ async function clickShowNumberAndExtract(page) {
       }
     }
 
-    // 3. Full page scan for Indian mobile numbers
     const bodyText = document.body.innerText || '';
     const match = bodyText.match(/(?:\+91[\s\-]?)?[6-9]\d{9}/);
     return match ? match[0].replace(/[\s\-]/g, '') : '';
@@ -309,12 +289,12 @@ async function clickShowNumberAndExtract(page) {
   return phone;
 }
 
-async function extractInlineBusinesses(page, category, city, cityBase) {
-  return await page.evaluate((base, cat, cityName) => {
+// FIX: receive args as a single object — Playwright page.evaluate only allows 1 argument
+async function extractInlineBusinesses(page, { cityBase, category, city }) {
+  return await page.evaluate(({ base, cat, cityName }) => {
     const businesses = [];
     const seen = new Set();
 
-    // Try various card/listing selectors
     const selectors = [
       '.listing-item', '.business-card', '.biz-card',
       '.result-item', '.directory-item', '.listing-box',
@@ -359,7 +339,7 @@ async function extractInlineBusinesses(page, category, city, cityBase) {
     });
 
     return businesses;
-  }, cityBase, category, city);
+  }, { base: cityBase, cat: category, cityName: city }); // single object arg
 }
 
 async function getNextPageUrl(page, currentUrl) {
