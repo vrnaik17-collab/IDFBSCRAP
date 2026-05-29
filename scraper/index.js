@@ -72,4 +72,5 @@ async function runScraper() {
   return allBusinesses;
 }
 
-module.exports = { runScraper };
+// ✅ Fixed: export as default function so index.js can call it as scraper()
+module.exports = runScraper;
