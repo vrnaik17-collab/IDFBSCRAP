@@ -1,8 +1,6 @@
 const { randomDelay, withRetry } = require('../utils/helpers');
 const logger = require('../utils/logger');
 
-const CITY = process.env.CITY || 'bangalore';
-
 const SKIP_SLUGS = [
   'register', 'about', 'about-us', 'contact', 'contact-us',
   'login', 'logout', 'privacy', 'privacy-policy', 'terms',
@@ -11,49 +9,22 @@ const SKIP_SLUGS = [
 ];
 
 async function navigateToCityPage(page) {
-  // Step 1 — open idbf.in
-  logger.info('Step 1: Opening https://idbf.in');
-  await page.goto('https://idbf.in', {
-    waitUntil: 'domcontentloaded',
-    timeout: 90000
-  });
-  await page.waitForTimeout(4000);
-  logger.info(`Loaded: ${await page.title()}`);
+  const CITY = process.env.CITY || 'bangalore';
 
-  // Step 2 — find and click city link
-  logger.info(`Step 2: Finding city link for "${CITY}"`);
-  const cityHref = await page.evaluate((city) => {
-    const anchors = document.querySelectorAll('a[href]');
-    for (const el of anchors) {
-      const href = (el.getAttribute('href') || '').toLowerCase();
-      const text = (el.textContent || '').toLowerCase().trim();
-      if (href.includes(`${city}.idbf.in`) || text === city.toLowerCase()) {
-        return el.getAttribute('href');
-      }
-    }
-    return null;
-  }, CITY);
+  // Build the city URL directly — no need to go through the homepage.
+  // The site always follows the pattern: https://{city}.idbf.in
+  const cityBase = `https://${CITY}.idbf.in`;
+  process.env.CITY_BASE_URL = cityBase;
+  process.env.BASE_URL = cityBase;
 
-  if (!cityHref) {
-    throw new Error(`City link for "${CITY}" not found on idbf.in`);
-  }
-
-  logger.info(`Found city link: ${cityHref}`);
-
-  // Step 3 — navigate to city page
-  logger.info(`Step 3: Opening city page ${cityHref}`);
-  await page.goto(cityHref, {
-    waitUntil: 'domcontentloaded',
+  logger.info(`Step 1: Navigating directly to city page ${cityBase}`);
+  await page.goto(cityBase, {
+    waitUntil: 'networkidle',   // wait for JS-rendered content
     timeout: 90000
   });
   await page.waitForTimeout(5000);
   await autoScroll(page);
   await page.waitForTimeout(2000);
-
-  const cityPageUrl = page.url();
-  const cityBase = new URL(cityPageUrl).origin; // e.g. https://bangalore.idbf.in
-  process.env.CITY_BASE_URL = cityBase;
-  process.env.BASE_URL = cityBase;
 
   logger.info(`City page loaded: ${await page.title()}`);
   logger.info(`City base URL: ${cityBase}`);
@@ -64,11 +35,11 @@ async function navigateToCityPage(page) {
 async function extractCategories(page) {
   return withRetry(async () => {
 
-    // Navigate from idbf.in → city page
+    // Navigate directly to the city page
     const cityBase = await navigateToCityPage(page);
 
-    // Step 4 — find the A-Z category index link
-    logger.info('Step 4: Finding A-Z category list');
+    // Step 2 — find the A-Z category index link
+    logger.info('Step 2: Finding A-Z category list');
 
     const azUrl = await page.evaluate((base) => {
       const anchors = document.querySelectorAll('a[href]');
@@ -89,13 +60,11 @@ async function extractCategories(page) {
       return null;
     }, cityBase);
 
-    let categoryPageUrl = azUrl;
-
     if (azUrl) {
       logger.info(`Found A-Z link: ${azUrl}`);
-      logger.info('Step 5: Opening A-Z category page');
+      logger.info('Step 3: Opening A-Z category page');
       await page.goto(azUrl, {
-        waitUntil: 'domcontentloaded',
+        waitUntil: 'networkidle',
         timeout: 90000
       });
       await page.waitForTimeout(4000);
@@ -105,8 +74,8 @@ async function extractCategories(page) {
       logger.info('No A-Z link found — extracting categories from city homepage directly');
     }
 
-    // Step 6 — extract all category links
-    logger.info('Step 6: Extracting category links');
+    // Step 4 — extract all category links
+    logger.info('Step 4: Extracting category links');
 
     const allLinks = await page.evaluate((base) => {
       const links = [];
@@ -137,21 +106,12 @@ async function extractCategories(page) {
       path = path.replace(/^\//, '').replace(/\/$/, '');
 
       if (!path || path.length < 2) return false;
-
-      // Skip exact junk pages
       if (SKIP_SLUGS.includes(path)) return false;
-
-      // Skip single letters a-z
       if (/^[a-z]$/.test(path)) return false;
-
-      // Skip numeric IDs — those are business detail pages
       if (/^\d/.test(path)) return false;
 
-      // Skip multi-level paths except pagination
       const parts = path.split('/');
       if (parts.length > 1 && !path.includes('page')) return false;
-
-      // Must have letters
       if (!/[a-z]/.test(path)) return false;
 
       return true;
