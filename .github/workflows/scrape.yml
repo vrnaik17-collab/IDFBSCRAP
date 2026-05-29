@@ -1,4 +1,37 @@
-- name: Run scraper
+name: IDBF Scraper
+
+on:
+  workflow_dispatch:
+    inputs:
+      cities:
+        description: 'Cities to scrape e.g. bangalore,mumbai,delhi'
+        required: false
+        default: 'bangalore'
+  schedule:
+    - cron: '0 2 * * *'
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
+      - name: Run scraper
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
@@ -11,3 +44,11 @@
           LOG_LEVEL: info
           OUTPUT_DIR: ./output
         run: node index.js
+
+      - name: Upload output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scraper-output-${{ github.run_id }}
+          path: output/
+          retention-days: 30
