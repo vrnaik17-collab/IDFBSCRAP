@@ -10,40 +10,100 @@ const SKIP_SLUGS = [
 
 async function navigateToCityPage(page) {
   const CITY = process.env.CITY || 'bangalore';
-  const cityBase = `https://${CITY}.idbf.in`;
 
-  // Step 1 — Set Referer header so the city page thinks we came from idbf.in
-  // This avoids bot detection that triggers when navigating directly without a referrer.
-  await page.setExtraHTTPHeaders({
-    'Referer': 'https://idbf.in/',
-    'Origin': 'https://idbf.in'
-  });
-
-  logger.info(`Step 1: Navigating to city page ${cityBase} (with Referer: https://idbf.in/)`);
-  await page.goto(cityBase, {
+  // Step 1 — Open idbf.in and wait until city links are actually in the DOM.
+  // We do NOT use networkidle (times out) or domcontentloaded alone (page is empty).
+  // Instead we wait for a known anchor that always exists on the page.
+  logger.info('Step 1: Opening https://idbf.in');
+  await page.goto('https://idbf.in', {
     waitUntil: 'domcontentloaded',
     timeout: 90000
   });
 
-  await page.waitForSelector('body', { timeout: 30000 });
-  await page.waitForTimeout(5000);
-  await autoScroll(page);
-  await page.waitForTimeout(3000);
+  // Wait until at least one idbf.in city link appears — this is our signal
+  // that the city list has been injected into the DOM.
+  logger.info('Waiting for city links to appear in DOM...');
+  try {
+    await page.waitForSelector('a[href*=".idbf.in"]', { timeout: 30000 });
+  } catch (e) {
+    // If no city link appears, dump what IS on the page for debugging
+    const bodyLen = await page.evaluate(() => document.body.innerHTML.length);
+    const sample = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('a[href]'))
+        .slice(0, 20)
+        .map(el => `"${el.textContent.trim().slice(0, 30)}" → ${el.getAttribute('href')}`)
+    );
+    logger.warn(`No city links found after 30s. Body: ${bodyLen} chars. Links on page:`);
+    sample.forEach(l => logger.info(`  ${l}`));
+    throw new Error('City links did not appear on idbf.in — page may be blocked or slow');
+  }
 
   const title = await page.title();
   const bodyLen = await page.evaluate(() => document.body.innerHTML.length);
-  logger.info(`City page loaded: "${title}" (body: ${bodyLen} chars)`);
+  logger.info(`idbf.in loaded: "${title}" (body: ${bodyLen} chars)`);
 
-  if (bodyLen < 500) {
-    throw new Error(`City page for "${CITY}" loaded with almost no content (${bodyLen} chars) — possible block`);
+  // Step 2 — Find the city link
+  logger.info(`Step 2: Finding city link for "${CITY}"`);
+  const cityLinkSelector = await page.evaluate((city) => {
+    const anchors = Array.from(document.querySelectorAll('a[href]'));
+    for (const el of anchors) {
+      const href = (el.getAttribute('href') || '').toLowerCase();
+      const text = (el.textContent || '').toLowerCase().trim();
+      if (
+        href.includes(`${city}.idbf.in`) ||
+        text === city.toLowerCase()
+      ) {
+        // Return a unique attribute we can use to click the element
+        return el.getAttribute('href');
+      }
+    }
+    return null;
+  }, CITY);
+
+  if (!cityLinkSelector) {
+    const allCityLinks = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('a[href*=".idbf.in"]'))
+        .slice(0, 20)
+        .map(el => `"${el.textContent.trim()}" → ${el.getAttribute('href')}`)
+    );
+    logger.warn('Could not find city link. Available city links:');
+    allCityLinks.forEach(l => logger.info(`  ${l}`));
+    throw new Error(`City link for "${CITY}" not found on idbf.in`);
   }
 
-  const actualBase = new URL(page.url()).origin;
-  process.env.CITY_BASE_URL = actualBase;
-  process.env.BASE_URL = actualBase;
-  logger.info(`City base URL: ${actualBase}`);
+  logger.info(`Found city link: ${cityLinkSelector}`);
 
-  return actualBase;
+  // Step 3 — Click the city link (required — direct navigation to city subdomain
+  // gets blocked, but clicking the link from the homepage works normally).
+  logger.info(`Step 3: Clicking city link to navigate to ${CITY}.idbf.in`);
+  const [response] = await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 90000 }),
+    page.click(`a[href="${cityLinkSelector}"]`)
+  ]);
+
+  // Wait for city page content to load
+  logger.info('Waiting for city page content...');
+  try {
+    await page.waitForSelector('a[href]', { timeout: 30000 });
+  } catch (e) {
+    logger.warn('No links appeared on city page after 30s');
+  }
+
+  await page.waitForTimeout(4000);
+  await autoScroll(page);
+  await page.waitForTimeout(2000);
+
+  const cityPageUrl = page.url();
+  const cityBase = new URL(cityPageUrl).origin;
+  process.env.CITY_BASE_URL = cityBase;
+  process.env.BASE_URL = cityBase;
+
+  const cityTitle = await page.title();
+  const cityBodyLen = await page.evaluate(() => document.body.innerHTML.length);
+  logger.info(`City page loaded: "${cityTitle}" (body: ${cityBodyLen} chars)`);
+  logger.info(`City base URL: ${cityBase}`);
+
+  return cityBase;
 }
 
 async function extractCategories(page) {
@@ -51,8 +111,8 @@ async function extractCategories(page) {
 
     const cityBase = await navigateToCityPage(page);
 
-    // Step 2 — find the A-Z category index link
-    logger.info('Step 2: Finding A-Z category list');
+    // Step 4 — find the A-Z category index link
+    logger.info('Step 4: Finding A-Z category list');
 
     const azUrl = await page.evaluate((base) => {
       const anchors = document.querySelectorAll('a[href]');
@@ -75,12 +135,14 @@ async function extractCategories(page) {
 
     if (azUrl) {
       logger.info(`Found A-Z link: ${azUrl}`);
-      logger.info('Step 3: Opening A-Z category page');
+      logger.info('Step 5: Opening A-Z category page');
       await page.goto(azUrl, {
         waitUntil: 'domcontentloaded',
         timeout: 90000
       });
-      await page.waitForSelector('body', { timeout: 30000 });
+      try {
+        await page.waitForSelector('a[href]', { timeout: 30000 });
+      } catch (e) {}
       await page.waitForTimeout(4000);
       await autoScroll(page);
       await page.waitForTimeout(2000);
@@ -88,8 +150,8 @@ async function extractCategories(page) {
       logger.info('No A-Z link found — extracting categories from city homepage directly');
     }
 
-    // Step 3 — extract all category links
-    logger.info('Step 4: Extracting category links');
+    // Step 6 — extract all category links
+    logger.info('Step 6: Extracting category links');
 
     const allLinks = await page.evaluate((base) => {
       const links = [];
@@ -112,12 +174,6 @@ async function extractCategories(page) {
     }, cityBase);
 
     logger.info(`Total links found: ${allLinks.length}`);
-
-    // Log sample for debugging
-    if (allLinks.length > 0) {
-      logger.info('Sample links:');
-      allLinks.slice(0, 10).forEach(l => logger.info(`  "${l.name}" → ${l.url}`));
-    }
 
     const categories = allLinks.filter(link => {
       const url = link.url.toLowerCase();
