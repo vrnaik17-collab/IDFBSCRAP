@@ -11,7 +11,7 @@ const OUTPUT_DIR = process.env.OUTPUT_DIR || './output';
 async function main() {
   logger.info('='.repeat(50));
   logger.info('IDBF Scraper Starting');
-  logger.info('Target: ' + (process.env.BASE_URL || 'https://bangalore.idbf.in'));
+  logger.info('Target: ' + (process.env.BASE_URL || 'https://idbf.in'));
   logger.info('='.repeat(50));
 
   if (!fs.existsSync(OUTPUT_DIR)) {
@@ -25,8 +25,18 @@ async function main() {
     logger.info('Database connected successfully.');
   }
 
-  // Correct import
-  const { runScraper } = require('./scraper/index');
+  // Load scraper
+  let runScraper;
+  try {
+    const scraperModule = require('./scraper/index');
+    runScraper = scraperModule.runScraper;
+    if (typeof runScraper !== 'function') {
+      throw new Error(`runScraper is not a function. Got: ${typeof runScraper}. Module keys: ${Object.keys(scraperModule).join(', ')}`);
+    }
+  } catch (err) {
+    logger.error(`Failed to load scraper module: ${err.message}`);
+    process.exit(1);
+  }
 
   let businesses = [];
 
