@@ -11,20 +11,62 @@ const SKIP_SLUGS = [
 async function navigateToCityPage(page) {
   const CITY = process.env.CITY || 'bangalore';
 
-  // Build the city URL directly — no need to go through the homepage.
-  // The site always follows the pattern: https://{city}.idbf.in
-  const cityBase = `https://${CITY}.idbf.in`;
-  process.env.CITY_BASE_URL = cityBase;
-  process.env.BASE_URL = cityBase;
-
-  logger.info(`Step 1: Navigating directly to city page ${cityBase}`);
-  await page.goto(cityBase, {
-    waitUntil: 'networkidle',   // wait for JS-rendered content
+  // Step 1 — open idbf.in and wait for full JS render
+  logger.info('Step 1: Opening https://idbf.in');
+  await page.goto('https://idbf.in', {
+    waitUntil: 'networkidle',
     timeout: 90000
   });
   await page.waitForTimeout(5000);
   await autoScroll(page);
+  await page.waitForTimeout(3000);
+  logger.info(`Loaded: ${await page.title()}`);
+
+  // Step 2 — find city link (case-insensitive, checks href and text)
+  logger.info(`Step 2: Finding city link for "${CITY}"`);
+  const cityHref = await page.evaluate((city) => {
+    const anchors = document.querySelectorAll('a[href]');
+    for (const el of anchors) {
+      const href = (el.getAttribute('href') || '').toLowerCase();
+      const text = (el.textContent || '').toLowerCase().trim();
+      if (
+        href.includes(`${city}.idbf.in`) ||
+        href.includes(`/${city}`) ||
+        text === city.toLowerCase()
+      ) {
+        return el.getAttribute('href');
+      }
+    }
+    return null;
+  }, CITY);
+
+  if (!cityHref) {
+    // Debug: dump all links so we can see what's on the page
+    const allLinks = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('a[href]')).slice(0, 40).map(el => ({
+        text: el.textContent.trim().slice(0, 40),
+        href: el.getAttribute('href')
+      }))
+    );
+    logger.warn('City link not found. All links on page:');
+    allLinks.forEach(l => logger.info(`  "${l.text}" → ${l.href}`));
+    throw new Error(`City link for "${CITY}" not found on idbf.in`);
+  }
+
+  logger.info(`Found city link: ${cityHref}`);
+
+  // Step 3 — click the city link (simulates real user click)
+  logger.info(`Step 3: Clicking city link and navigating to city page`);
+  await page.click(`a[href="${cityHref}"]`);
+  await page.waitForLoadState('networkidle', { timeout: 90000 });
+  await page.waitForTimeout(5000);
+  await autoScroll(page);
   await page.waitForTimeout(2000);
+
+  const cityPageUrl = page.url();
+  const cityBase = new URL(cityPageUrl).origin;
+  process.env.CITY_BASE_URL = cityBase;
+  process.env.BASE_URL = cityBase;
 
   logger.info(`City page loaded: ${await page.title()}`);
   logger.info(`City base URL: ${cityBase}`);
@@ -35,11 +77,10 @@ async function navigateToCityPage(page) {
 async function extractCategories(page) {
   return withRetry(async () => {
 
-    // Navigate directly to the city page
     const cityBase = await navigateToCityPage(page);
 
-    // Step 2 — find the A-Z category index link
-    logger.info('Step 2: Finding A-Z category list');
+    // Step 4 — find the A-Z category index link
+    logger.info('Step 4: Finding A-Z category list');
 
     const azUrl = await page.evaluate((base) => {
       const anchors = document.querySelectorAll('a[href]');
@@ -62,7 +103,7 @@ async function extractCategories(page) {
 
     if (azUrl) {
       logger.info(`Found A-Z link: ${azUrl}`);
-      logger.info('Step 3: Opening A-Z category page');
+      logger.info('Step 5: Opening A-Z category page');
       await page.goto(azUrl, {
         waitUntil: 'networkidle',
         timeout: 90000
@@ -74,8 +115,8 @@ async function extractCategories(page) {
       logger.info('No A-Z link found — extracting categories from city homepage directly');
     }
 
-    // Step 4 — extract all category links
-    logger.info('Step 4: Extracting category links');
+    // Step 6 — extract all category links
+    logger.info('Step 6: Extracting category links');
 
     const allLinks = await page.evaluate((base) => {
       const links = [];
@@ -99,7 +140,6 @@ async function extractCategories(page) {
 
     logger.info(`Total links found: ${allLinks.length}`);
 
-    // Filter to real category slugs only
     const categories = allLinks.filter(link => {
       const url = link.url.toLowerCase();
       let path = url.replace(cityBase.toLowerCase(), '');
@@ -117,7 +157,6 @@ async function extractCategories(page) {
       return true;
     });
 
-    // Deduplicate
     const seenUrls = new Set();
     const unique = categories.filter(c => {
       if (seenUrls.has(c.url)) return false;
