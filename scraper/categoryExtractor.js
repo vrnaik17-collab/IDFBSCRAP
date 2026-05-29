@@ -5,33 +5,44 @@ const SKIP_SLUGS = [
   'register', 'about', 'about-us', 'contact', 'contact-us',
   'login', 'logout', 'privacy', 'privacy-policy', 'terms',
   'terms-and-conditions', 'sitemap', 'advertise', 'feedback',
-  'faq', 'help', 'blog', 'news'
+  'faq', 'help', 'blog', 'news', 'disclaimer', 'terms-conditions',
+  'privacy-policy'
 ];
 
 async function navigateToCityPage(page) {
   const CITY = process.env.CITY || 'bangalore';
 
-  // Step 1 — open idbf.in and wait for full JS render
+  // Step 1 — open idbf.in
+  // Use domcontentloaded — networkidle times out because the site has
+  // persistent background requests that never settle.
   logger.info('Step 1: Opening https://idbf.in');
   await page.goto('https://idbf.in', {
-    waitUntil: 'networkidle',
+    waitUntil: 'domcontentloaded',
     timeout: 90000
   });
+
+  // Wait for body content to appear, then scroll to trigger any lazy loading
+  await page.waitForSelector('body', { timeout: 30000 });
   await page.waitForTimeout(5000);
   await autoScroll(page);
   await page.waitForTimeout(3000);
-  logger.info(`Loaded: ${await page.title()}`);
 
-  // Step 2 — find city link (case-insensitive, checks href and text)
+  const title = await page.title();
+  const bodyLen = await page.evaluate(() => document.body.innerHTML.length);
+  logger.info(`Loaded: "${title}" (body: ${bodyLen} chars)`);
+
+  // Step 2 — find city link
+  // The city list is server-side rendered so links are present in the DOM.
+  // Match: href contains "{city}.idbf.in" OR link text matches city name.
   logger.info(`Step 2: Finding city link for "${CITY}"`);
+
   const cityHref = await page.evaluate((city) => {
-    const anchors = document.querySelectorAll('a[href]');
+    const anchors = Array.from(document.querySelectorAll('a[href]'));
     for (const el of anchors) {
       const href = (el.getAttribute('href') || '').toLowerCase();
       const text = (el.textContent || '').toLowerCase().trim();
       if (
         href.includes(`${city}.idbf.in`) ||
-        href.includes(`/${city}`) ||
         text === city.toLowerCase()
       ) {
         return el.getAttribute('href');
@@ -41,24 +52,32 @@ async function navigateToCityPage(page) {
   }, CITY);
 
   if (!cityHref) {
-    // Debug: dump all links so we can see what's on the page
-    const allLinks = await page.evaluate(() =>
-      Array.from(document.querySelectorAll('a[href]')).slice(0, 40).map(el => ({
-        text: el.textContent.trim().slice(0, 40),
-        href: el.getAttribute('href')
-      }))
+    // Debug dump so we can diagnose what's on the page
+    const sample = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('a[href]'))
+        .slice(0, 50)
+        .map(el => `"${el.textContent.trim().slice(0, 30)}" → ${el.getAttribute('href')}`)
     );
-    logger.warn('City link not found. All links on page:');
-    allLinks.forEach(l => logger.info(`  "${l.text}" → ${l.href}`));
+    logger.warn('City link not found. Sample links on page:');
+    sample.forEach(l => logger.info(`  ${l}`));
     throw new Error(`City link for "${CITY}" not found on idbf.in`);
   }
 
   logger.info(`Found city link: ${cityHref}`);
 
-  // Step 3 — click the city link (simulates real user click)
-  logger.info(`Step 3: Clicking city link and navigating to city page`);
-  await page.click(`a[href="${cityHref}"]`);
-  await page.waitForLoadState('networkidle', { timeout: 90000 });
+  // Step 3 — navigate to city page by clicking the link
+  logger.info(`Step 3: Navigating to city page`);
+
+  // Use goto instead of click — more reliable in headless CI environments
+  const fullHref = cityHref.startsWith('http')
+    ? cityHref
+    : `https://idbf.in${cityHref.startsWith('/') ? '' : '/'}${cityHref}`;
+
+  await page.goto(fullHref, {
+    waitUntil: 'domcontentloaded',
+    timeout: 90000
+  });
+  await page.waitForSelector('body', { timeout: 30000 });
   await page.waitForTimeout(5000);
   await autoScroll(page);
   await page.waitForTimeout(2000);
@@ -68,7 +87,7 @@ async function navigateToCityPage(page) {
   process.env.CITY_BASE_URL = cityBase;
   process.env.BASE_URL = cityBase;
 
-  logger.info(`City page loaded: ${await page.title()}`);
+  logger.info(`City page loaded: "${await page.title()}"`);
   logger.info(`City base URL: ${cityBase}`);
 
   return cityBase;
@@ -89,7 +108,7 @@ async function extractCategories(page) {
         const text = (el.textContent || '').toLowerCase().trim();
         if (
           text.includes('a-z') || text.includes('a to z') ||
-          text.includes('categories') || text.includes('all categories') ||
+          text.includes('all categories') ||
           href.includes('/a-z') || href.includes('/categories')
         ) {
           if (!href.startsWith('http')) {
@@ -105,9 +124,10 @@ async function extractCategories(page) {
       logger.info(`Found A-Z link: ${azUrl}`);
       logger.info('Step 5: Opening A-Z category page');
       await page.goto(azUrl, {
-        waitUntil: 'networkidle',
+        waitUntil: 'domcontentloaded',
         timeout: 90000
       });
+      await page.waitForSelector('body', { timeout: 30000 });
       await page.waitForTimeout(4000);
       await autoScroll(page);
       await page.waitForTimeout(2000);
