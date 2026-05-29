@@ -21,15 +21,26 @@ async function extractCategories(page) {
       timeout: 60000
     });
 
-    await page.waitForTimeout(6000);
+    await page.waitForTimeout(8000);
     await autoScroll(page);
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(4000);
 
     const title = await page.title();
-    logger.info(`Page title: ${title}`);
+    const bodyText = await page.evaluate(() => document.body.innerText || '');
+    const htmlLen = await page.evaluate(() => document.body.innerHTML.length);
 
-    const bodyPreview = await page.evaluate(() => document.body.innerText.substring(0, 200));
-    logger.info(`Page preview: ${bodyPreview}`);
+    logger.info(`Page title: "${title}"`);
+    logger.info(`Body text length: ${bodyText.length}`);
+    logger.info(`HTML length: ${htmlLen}`);
+    logger.info(`Body preview: ${bodyText.substring(0, 300)}`);
+
+    // If page is blank retry with longer wait
+    if (bodyText.length < 100) {
+      logger.warn('Page loaded blank — waiting longer and retrying...');
+      await page.waitForTimeout(10000);
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.waitForTimeout(8000);
+    }
 
     const allLinks = await page.evaluate((baseUrl) => {
       const links = [];
@@ -52,6 +63,13 @@ async function extractCategories(page) {
     }, BASE_URL);
 
     logger.info(`Total links found: ${allLinks.length}`);
+
+    if (allLinks.length === 0) {
+      // Log full HTML for debugging
+      const html = await page.evaluate(() => document.documentElement.outerHTML.substring(0, 1000));
+      logger.info(`HTML snapshot: ${html}`);
+      throw new Error('Page loaded blank — no links found. Will retry.');
+    }
 
     const categories = allLinks.filter(link => {
       const url = link.url.toLowerCase();
@@ -81,13 +99,13 @@ async function extractCategories(page) {
     unique.forEach(c => logger.info(`  → ${c.name} | ${c.url}`));
 
     if (unique.length === 0) {
-      logger.warn('0 categories — dumping all links:');
-      allLinks.forEach(l => logger.info(`  ALL: ${l.name} | ${l.url}`));
+      logger.warn('0 categories — all links dump:');
+      allLinks.forEach(l => logger.info(`  ${l.name} | ${l.url}`));
       return [{ name: 'All Businesses', url: BASE_URL }];
     }
 
     return unique;
-  }, 3, 5000, 'extractCategories');
+  }, 5, 8000, 'extractCategories');
 }
 
 async function autoScroll(page) {
