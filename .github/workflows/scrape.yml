@@ -12,7 +12,9 @@ on:
 
 jobs:
   scrape:
-    runs-on: ubuntu-latest
+    # Change this to 'self-hosted' to run on your own machine
+    # Setup: https://github.com/YOUR_USERNAME/YOUR_REPO/settings/actions/runners
+    runs-on: self-hosted
     timeout-minutes: 360
 
     steps:
