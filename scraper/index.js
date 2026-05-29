@@ -9,7 +9,7 @@ async function runScraper() {
   let context = null;
   const allBusinesses = [];
 
-  const citiesEnv = process.env.CITIES || process.env.CITY || 'bangalore';
+  const citiesEnv = process.env.CITIES || 'bangalore';
   const cities = citiesEnv.split(',').map(c => c.trim().toLowerCase()).filter(Boolean);
 
   logger.info(`Cities to scrape: ${cities.join(', ')}`);
@@ -22,18 +22,15 @@ async function runScraper() {
       logger.info(`CITY: ${city.toUpperCase()}`);
       logger.info('='.repeat(50));
 
-      process.env.CITY = city;
+      // Set BASE_URL directly to city subdomain
+      process.env.BASE_URL = `https://${city}.idbf.in`;
 
       context = await createContext(browser);
       const page = await createPage(context);
 
       try {
-        // extractCategories handles full flow:
-        // idbf.in → click city → A-Z index → extract categories
         const categories = await extractCategories(page);
-        logger.info(`Total categories found: ${categories.length}`);
-
-        const cityBase = process.env.CITY_BASE_URL || `https://${city}.idbf.in`;
+        logger.info(`Total categories: ${categories.length}`);
 
         for (let i = 0; i < categories.length; i++) {
           const cat = categories[i];
@@ -51,7 +48,6 @@ async function runScraper() {
             await randomDelay(2000, 4000);
           }
         }
-
       } catch (err) {
         logger.error(`City "${city}" failed: ${err.message}`);
       } finally {
@@ -63,7 +59,6 @@ async function runScraper() {
         await randomDelay(5000, 10000);
       }
     }
-
   } finally {
     if (context) await context.close();
     await closeBrowser();
@@ -72,4 +67,4 @@ async function runScraper() {
   return allBusinesses;
 }
 
-module.exports = runScraper;
+module.exports = { runScraper };
