@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const ws = require('ws');
 const logger = require('../utils/logger');
 
 let supabase = null;
@@ -14,9 +15,10 @@ function getClient() {
     return null;
   }
 
-  // Disable realtime to avoid WebSocket issues on Node < 22
+  // Pass ws package to fix WebSocket issue on Node < 22
   supabase = createClient(url, key, {
     realtime: {
+      transport: ws,
       params: {
         eventsPerSecond: -1
       }
