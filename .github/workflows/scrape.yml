@@ -12,9 +12,7 @@ on:
 
 jobs:
   scrape:
-    # Change this to 'self-hosted' to run on your own machine
-    # Setup: https://github.com/YOUR_USERNAME/YOUR_REPO/settings/actions/runners
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
@@ -38,8 +36,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           CITIES: ${{ github.event.inputs.cities || 'bangalore' }}
-          CITY: bangalore
-          BASE_URL: https://idbf.in
+          BASE_URL: https://bangalore.idbf.in
           HEADLESS: true
           MIN_DELAY_MS: 1500
           MAX_DELAY_MS: 3000
