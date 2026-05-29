@@ -316,4 +316,4 @@ async function getNextPageUrl(page, currentUrl) {
   }, { current: currentUrl });
 }
 
-module.exports = { scrapeCategory };
+module.exports = { runScraper };
