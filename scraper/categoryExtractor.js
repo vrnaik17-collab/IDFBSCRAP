@@ -1,8 +1,6 @@
 const { randomDelay, withRetry } = require('../utils/helpers');
 const logger = require('../utils/logger');
 
-const BASE_URL = process.env.BASE_URL || 'https://bangalore.idbf.in';
-
 const SKIP_EXACT = [
   'register', 'about', 'about-us', 'contact', 'contact-us',
   'login', 'logout', 'privacy', 'privacy-policy', 'terms',
@@ -12,37 +10,84 @@ const SKIP_EXACT = [
   'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'
 ];
 
-async function extractCategories(page) {
+async function extractCategories(page, city) {
   return withRetry(async () => {
-    logger.info(`Opening homepage: ${BASE_URL}`);
 
-    await page.goto(BASE_URL, {
+    // STEP 1 — Open idbf.in homepage
+    logger.info('Step 1: Opening https://idbf.in');
+    await page.goto('https://idbf.in', {
       waitUntil: 'domcontentloaded',
       timeout: 60000
     });
+    await page.waitForTimeout(5000);
+    logger.info(`idbf.in loaded. Title: ${await page.title()}`);
 
-    await page.waitForTimeout(8000);
-    await autoScroll(page);
-    await page.waitForTimeout(4000);
+    // STEP 2 — Find the city link and click it
+    logger.info(`Step 2: Finding link for city "${city}"`);
 
-    const title = await page.title();
-    const bodyText = await page.evaluate(() => document.body.innerText || '');
-    const htmlLen = await page.evaluate(() => document.body.innerHTML.length);
+    const cityLink = await page.evaluate(({ cityName }) => {
+      const anchors = document.querySelectorAll('a[href]');
+      for (const el of anchors) {
+        const href = (el.getAttribute('href') || '').toLowerCase();
+        const text = (el.textContent || '').toLowerCase().trim();
+        if (
+          href.includes(`${cityName}.idbf.in`) ||
+          text === cityName.toLowerCase()
+        ) {
+          return el.getAttribute('href');
+        }
+      }
+      return null;
+    }, { cityName: city });
 
-    logger.info(`Page title: "${title}"`);
-    logger.info(`Body text length: ${bodyText.length}`);
-    logger.info(`HTML length: ${htmlLen}`);
-    logger.info(`Body preview: ${bodyText.substring(0, 300)}`);
-
-    // If page is blank retry with longer wait
-    if (bodyText.length < 100) {
-      logger.warn('Page loaded blank — waiting longer and retrying...');
-      await page.waitForTimeout(10000);
-      await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
-      await page.waitForTimeout(8000);
+    if (!cityLink) {
+      // Log all links to debug
+      const allHrefs = await page.evaluate(() => {
+        return Array.from(document.querySelectorAll('a[href]'))
+          .map(el => ({
+            text: (el.textContent || '').trim(),
+            href: el.getAttribute('href')
+          }))
+          .filter(l => l.href && l.href.includes('idbf.in'))
+          .slice(0, 30);
+      });
+      logger.warn('City link not found. Available idbf.in links:');
+      allHrefs.forEach(l => logger.info(`  "${l.text}" → ${l.href}`));
+      throw new Error(`City link for "${city}" not found on idbf.in`);
     }
 
-    const allLinks = await page.evaluate((baseUrl) => {
+    logger.info(`Found city link: ${cityLink}`);
+
+    // STEP 3 — Click the city link
+    logger.info(`Step 3: Clicking city link → ${cityLink}`);
+    await page.goto(cityLink, {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000
+    });
+    await page.waitForTimeout(6000);
+    await autoScroll(page);
+    await page.waitForTimeout(3000);
+
+    const cityPageTitle = await page.title();
+    const cityPageUrl = page.url();
+    const cityBase = new URL(cityPageUrl).origin;
+
+    logger.info(`City page loaded: "${cityPageTitle}"`);
+    logger.info(`City URL: ${cityPageUrl}`);
+    logger.info(`City base: ${cityBase}`);
+
+    // Store for other modules
+    process.env.BASE_URL = cityBase;
+    process.env.CITY_BASE_URL = cityBase;
+
+    // STEP 4 — Extract all category links from city page
+    logger.info('Step 4: Extracting category links');
+
+    const bodyText = await page.evaluate(() => document.body.innerText || '');
+    logger.info(`City page body length: ${bodyText.length}`);
+    logger.info(`Preview: ${bodyText.substring(0, 300)}`);
+
+    const allLinks = await page.evaluate(({ base }) => {
       const links = [];
       const seen = new Set();
       document.querySelectorAll('a[href]').forEach(el => {
@@ -50,30 +95,24 @@ async function extractCategories(page) {
         const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
         if (!href || href === '#') return;
         if (!href.startsWith('http')) {
-          href = href.startsWith('/') ? `${baseUrl}${href}` : '';
+          href = href.startsWith('/') ? `${base}${href}` : '';
         }
-        if (!href.startsWith(baseUrl)) return;
-        if (href === baseUrl || href === baseUrl + '/') return;
+        if (!href.startsWith(base)) return;
+        if (href === base || href === base + '/') return;
         if (!seen.has(href) && text.length > 1 && text.length < 80) {
           seen.add(href);
           links.push({ name: text, url: href });
         }
       });
       return links;
-    }, BASE_URL);
+    }, { base: cityBase });
 
-    logger.info(`Total links found: ${allLinks.length}`);
+    logger.info(`Total links on city page: ${allLinks.length}`);
 
-    if (allLinks.length === 0) {
-      // Log full HTML for debugging
-      const html = await page.evaluate(() => document.documentElement.outerHTML.substring(0, 1000));
-      logger.info(`HTML snapshot: ${html}`);
-      throw new Error('Page loaded blank — no links found. Will retry.');
-    }
-
+    // Filter to real category pages only
     const categories = allLinks.filter(link => {
       const url = link.url.toLowerCase();
-      let path = url.replace(BASE_URL.toLowerCase(), '');
+      let path = url.replace(cityBase.toLowerCase(), '');
       path = path.replace(/^\//, '').replace(/\/$/, '');
 
       if (!path || path.length < 2) return false;
@@ -99,13 +138,14 @@ async function extractCategories(page) {
     unique.forEach(c => logger.info(`  → ${c.name} | ${c.url}`));
 
     if (unique.length === 0) {
-      logger.warn('0 categories — all links dump:');
+      logger.warn('0 categories found — dumping all links:');
       allLinks.forEach(l => logger.info(`  ${l.name} | ${l.url}`));
-      return [{ name: 'All Businesses', url: BASE_URL }];
+      return [{ name: 'All Businesses', url: cityBase }];
     }
 
     return unique;
-  }, 5, 8000, 'extractCategories');
+
+  }, 3, 8000, 'extractCategories');
 }
 
 async function autoScroll(page) {
